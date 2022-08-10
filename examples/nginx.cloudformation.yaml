@@ -1,0 +1,132 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Firelens Init Example
+
+Parameters:
+  InitImage:
+    Description: Init Container Image
+    Type: 'String'
+
+Resources:
+  ###################
+  ## S3 Resources ###
+  ###################
+  S3Bucket:
+    Type: AWS::S3::Bucket
+
+  ###################
+  ## CW Resources ###
+  ###################
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['-', [!Sub '${AWS::StackName}', 'loggroup']]
+      RetentionInDays: 7
+
+  ###################
+  ## IAM Resources ##
+  ###################
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+
+  S3Policies:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: 's3access'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Action:
+              - 's3:GetObject'
+              - 's3:ListBucket'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:s3:::${S3Bucket}'
+              - !Sub 'arn:${AWS::Partition}:s3:::${S3Bucket}/*'
+      Roles:
+        - Ref: 'EcsTaskRole'
+
+  ###################
+  ## ECS Resources ##
+  ###################
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Join ['-', [!Sub '${AWS::StackName}', 'taskdef']]
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: 'init'
+          Image: !Ref InitImage
+          Essential: false
+          Environment:
+            - Name: 'S3_BUCKET_FILE_1'
+              Value: !Ref S3Bucket
+            - Name: 'SRC_FILE_PATH_FILE_1'
+              Value: 'index.html'
+            - Name: 'DEST_FILE_PATH_FILE_1'
+              Value: '/data/index.html'
+          MountPoints:
+            - ContainerPath: '/data'
+              SourceVolume: 'staticontent'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'init'
+        - Name: 'nginx'
+          Image: public.ecr.aws/docker/library/nginx:latest
+          DependsOn:
+            - ContainerName: init
+              Condition: SUCCESS
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: 'TCP'
+          MountPoints:
+            - ContainerPath: '/usr/share/nginx/html'
+              ReadOnly: true
+              SourceVolume: 'staticontent'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: 'nginx'
+
+      Volumes:
+        - Name: 'staticontent'
+
+Outputs:
+  S3Bucket:
+    Description: S3 Bucket Name
+    Value: !Ref S3Bucket
