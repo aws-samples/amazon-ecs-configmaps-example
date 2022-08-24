@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Firelens Init Example
+Description: Nginx Init Example
 
 Parameters:
   InitImage:
