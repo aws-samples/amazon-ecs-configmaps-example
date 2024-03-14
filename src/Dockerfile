@@ -2,7 +2,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-FROM amazon/aws-cli:latest
+FROM public.ecr.aws/aws-cli/aws-cli:latest
 
 # AWS AppMesh does not send traffic through the envoy proxy if the process is
 # running as user 1337, hence why we setup that demouser in this RUN command.
