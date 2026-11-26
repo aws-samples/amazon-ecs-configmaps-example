@@ -7,7 +7,7 @@ contain any sensitive data. It is then recommended to either use [Environment
 Variables](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/taskdef-envfiles.html)
 or
 [Secrets](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/specifying-sensitive-data.html)
-to pass back in the environment specific data back at runtime.
+to pass the environment specific data back in at runtime.
 
 Many workloads also contain configuration files which are also environment
 specific. Following the guidance above, we want to remove these environment
@@ -20,7 +20,7 @@ Elastic Container Service (Amazon ECS) does not have a native configuration file
 resource.
 
 Instead there are multiple ways to pass a configuration file into an Amazon ECS
-Task, such as Amazon EFS or SSM Parameter Store. In in this project we show an
+Task, such as Amazon EFS or SSM Parameter Store. In this project we show an
 alternative approach leveraging Amazon S3 and an init container. This example is
 supported on both Amazon ECS running on Amazon EC2 as well as Amazon ECS running
 on AWS Fargate.
@@ -28,7 +28,7 @@ on AWS Fargate.
 The architecture for this solution is as follows:
 
 1. A user uploads a configuration file to an Amazon S3 bucket
-2. A user creates a Amazon ECS Task Definition with 2 containers and 1 shared
+2. A user creates an Amazon ECS Task Definition with 2 containers and 1 shared
    local volume.
     1. The first container is an "init" container. It will download the
        configuration file from S3 to the shared local volume. The first
@@ -46,7 +46,7 @@ The init container is built on top of the official
 [aws-cli](https://hub.docker.com/r/amazon/aws-cli) container image, and contains
 a single bash script that will run aws s3 cp to download each configuration
 file. This image could have been built with an AWS SDK instead of the aws cli,
-but with a design goal of keeping this simple, light weight and easy to
+but with a design goal of keeping this simple, lightweight and easy to
 maintain, going down this path removes a lot of the dependency management.
 
 The init container is configured with 3 environment variables for each
@@ -54,9 +54,9 @@ configuration file:
 
 * `S3_BUCKET_FILE_*` - The S3 Bucket that contains the configuration file.
 * `SRC_FILE_PATH_FILE_*` - The path within the S3 bucket to locate the
-  configuration file `/prodfiles/nginx.conf`.
-* `DEST_FILE_PATH_FILE_* `- The path within the init container you want to write
-  the configuration file too. For example if the shared local volume is mounted
+  configuration file, for example `prodfiles/nginx.conf`.
+* `DEST_FILE_PATH_FILE_*` - The path within the init container you want to write
+  the configuration file to. For example if the shared local volume is mounted
   to `/data` then this value could be `/data/nginx.conf`.
 
 This same init container can be used for multiple configuration files, the
@@ -70,64 +70,81 @@ configuration files.
 ### Building the init container:
 
 ```bash
-$ git clone https://github.com/aws-samples/amazon-ecs-configmaps-example.git
-$ cd amazon-ecs-configmaps-example/src/
+git clone https://github.com/aws-samples/amazon-ecs-configmaps-example.git
+cd amazon-ecs-configmaps-example/src/
 
 # Build the Container Image
-$ export DOCKER_BUILDKIT=1
-$ export IMAGE_URI=<acccount_id>.dkr.ecr.<region>.amazonaws.com/ecs-configmap
-$ export IMAGE_TAG=v0.1
+export IMAGE_URI=<account_id>.dkr.ecr.<region>.amazonaws.com/ecs-configmap
+export IMAGE_TAG=v0.1
 
-$ docker build \
-  --tag $IMAGE_URI:$IMAGE_TAG \
+# Create a docker-container builder for multi-platform zstd builds (one-time setup)
+docker buildx create \
+  --name zstd-builder \
+  --driver docker-container \
+  --driver-opt image=moby/buildkit:latest \
+  --use
+
+# Build and push a multi-platform image with zstd compressed layers
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --provenance=false \
+  --output type=image,name=$IMAGE_URI:$IMAGE_TAG,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true,push=true \
   .
-
-# Push the Container Image to the Image Repository
-$ docker push $IMAGE_URI:$IMAGE_TAG
 ```
+
+zstd compressed layers decompress faster than gzip, so tasks start faster on
+AWS Fargate. `oci-mediatypes=true` is required because Docker v2 manifests have
+no zstd layer type, and `force-compression=true` recompresses layers inherited
+from a gzip base image. To check the image, run `crane manifest
+$IMAGE_URI:$IMAGE_TAG` and confirm every layer media type is
+`application/vnd.oci.image.layer.v1.tar+zstd`.
 
 ### Example
 
 The examples repository contains a simple nginx example. The directory
-contains a cloudformation template with a Task Definition, as well as an
-`index.html` file. In the walk through we will deploy an nginx container to ECS
+contains an AWS CloudFormation template with a Task Definition, as well as an
+`index.html` file. In the walkthrough we will deploy an nginx container to ECS
 using the upstream nginx image, we will also deploy a second container in the
 ECS Task, the init container. The init container will download the `index.html`
 from Amazon S3 and place it in the nginx container at runtime.
 
 > Remember this index.html file could be any static configuration file that you
 > want to pass into a workload at runtime. The example is simplistic by design,
-> a more common example would be a Fluent bit configuration file.
+> a more common example would be a Fluent Bit configuration file.
 
-When running the below the commands, ensure you have the container image and tag
-Exported in your shell from the previous step. These instructions also assume
+When running the commands below, ensure you have the container image and tag
+exported in your shell from the previous step. These instructions also assume
 you have an existing VPC, Subnet, Security Group and ECS Cluster in your AWS
-account. It's worth nothing these instructions are not deploying a highly
+account. It's worth noting these instructions are not deploying a highly
 available, fault tolerant web server; it is simply highlighting the
 functionality of the init container.
 
 ```bash
 # Create the Task Definition
-$ cd ../
-$ aws cloudformation create-stack \
+cd ../
+aws cloudformation create-stack \
   --stack-name ecs-configmaps \
   --template-body file://examples/nginx.cloudformation.yaml \
   --capabilities CAPABILITY_IAM \
   --parameters \
-     ParameterKey=InitImage,ParameterValue="${IMAGE_URI}:${IMAGE_TAG}"
+  ParameterKey=InitImage,ParameterValue="${IMAGE_URI}:${IMAGE_TAG}"
 
-# Ensure to replace the S3 Bucket created by the Cloudformation Template
-$ S3_BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name ecs-configmaps --query "Stacks[0].Outputs[?OutputKey=='S3Bucket'].OutputValue" --output text)
-$ aws s3 cp \
+# Upload index.html to the S3 bucket created by the CloudFormation template
+S3_BUCKET_NAME=$(aws cloudformation describe-stacks \
+    --stack-name ecs-configmaps \
+    --query "Stacks[0].Outputs[?OutputKey=='S3Bucket'].OutputValue" \
+    --output text)
+
+aws s3 cp \
   examples/index.html \
   s3://$S3_BUCKET_NAME/
 
-# To then run the task you need to pass back in an existing resources.
-$ export SECURITY_GROUP_ID=<existing_security_group_with_port_80_open>
-$ export SUBNET_ID=<existing_subnet>
-$ export ECS_CLUSTER=<existing_ecs_cluster>
+# To then run the task you need to pass in existing resources.
+export SECURITY_GROUP_ID=<existing_security_group_with_port_80_open>
+export SUBNET_ID=<existing_subnet>
+export ECS_CLUSTER=<existing_ecs_cluster>
 
-$ aws ecs run-task \
+aws ecs run-task \
   --cluster $ECS_CLUSTER \
   --task-definition ecs-configmaps-taskdef  \
   --launch-type="FARGATE" \

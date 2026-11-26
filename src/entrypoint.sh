@@ -29,13 +29,22 @@ do
     echo "$DEST_FILE_PATH has been set as ${!DEST_FILE_PATH}"
 
     # Remove any directories from the path
-    FILE_NAME=$(echo "${!SRC_FILE_PATH}" | xargs basename)
+    FILE_NAME=$(basename "${!SRC_FILE_PATH}")
     echo "${FILE_NAME}"
 
-    # Download the file from s3 to the local directory
-    aws s3 cp \
-      s3://"${!BUCKET_NAME}"/"${!SRC_FILE_PATH}" \
-      "${HOME}"/"${FILE_NAME}"
+    # Download the file from s3 to the local directory, retrying up to 3 times
+    for attempt in 1 2 3
+    do
+        aws s3 cp \
+          s3://"${!BUCKET_NAME}"/"${!SRC_FILE_PATH}" \
+          "${HOME}"/"${FILE_NAME}" && break
+        if [ "$attempt" -eq 3 ]; then
+           echo "Failed to download ${FILE_NAME} after 3 attempts"
+           exit 1
+        fi
+        echo "Download failed, retrying in $((attempt * 2)) seconds"
+        sleep $((attempt * 2))
+    done
 
     # Copy the file to a mounted directory. The assumption is the mounted
     # directory is a bind mount, therefore sudo privileges are required.

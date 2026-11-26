@@ -96,7 +96,7 @@ Resources:
               Value: '/data/index.html'
           MountPoints:
             - ContainerPath: '/data'
-              SourceVolume: 'staticontent'
+              SourceVolume: 'staticcontent'
           LogConfiguration:
             LogDriver: 'awslogs'
             Options:
@@ -115,7 +115,7 @@ Resources:
           MountPoints:
             - ContainerPath: '/usr/share/nginx/html'
               ReadOnly: true
-              SourceVolume: 'staticontent'
+              SourceVolume: 'staticcontent'
           LogConfiguration:
             LogDriver: 'awslogs'
             Options:
@@ -124,7 +124,7 @@ Resources:
               awslogs-stream-prefix: 'nginx'
 
       Volumes:
-        - Name: 'staticontent'
+        - Name: 'staticcontent'
 
 Outputs:
   S3Bucket:
