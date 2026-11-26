@@ -1,13 +1,13 @@
-# syntax=docker/dockerfile:1.4
+# syntax=docker/dockerfile:1
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
 FROM public.ecr.aws/aws-cli/aws-cli:latest
 
-# AWS AppMesh does not send traffic through the envoy proxy if the process is
-# running as user 1337, hence why we setup that demouser in this RUN command.
+# Run as non-root UID 1337, which Envoy-based service meshes (such as AWS App
+# Mesh) exclude from proxying. sudo lets the script write to bind mounts.
 RUN <<EOF
-yum upgrade
+yum upgrade -y
 yum install -y sudo
 rm -fr /var/cache
 echo "demouser:x:1337:1337:demouser:/home/demouser:/bin/bash" >> /etc/passwd
